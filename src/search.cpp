@@ -314,6 +314,7 @@ void Thread::search() {
   optimism[~us] = -optimism[us];
 
   int searchAgainCounter = 0;
+  memset(mainThread->spentEffort, 0, sizeof(unsigned long long) * 64 * 64);
 
   // Iterative deepening loop until requested to stop or the target depth is reached
   while (   ++rootDepth < MAX_PLY
@@ -463,6 +464,8 @@ void Thread::search() {
           && !Threads.stop
           && !mainThread->stopOnPonderhit)
       {
+          int effort = (mainThread->spentEffort[from_sq(rootMoves[0].pv[0])][to_sq(rootMoves[0].pv[0])] * 100) / (mainThread->nodes);
+          float effortScaling = (110 - std::min(effort, 90)) / 50.0f;
           double fallingEval = (69 + 12 * (mainThread->bestPreviousAverageScore - bestValue)
                                     +  6 * (mainThread->iterValue[iterIdx] - bestValue)) / 781.4;
           fallingEval = std::clamp(fallingEval, 0.5, 1.5);
@@ -474,7 +477,7 @@ void Thread::search() {
           int complexity = mainThread->complexityAverage.value();
           double complexPosition = std::clamp(1.0 + (complexity - 326) / 1618.1, 0.5, 1.5);
 
-          double totalTime = Time.optimum() * fallingEval * reduction * bestMoveInstability * complexPosition;
+          double totalTime = Time.optimum() * fallingEval * effortScaling * reduction * bestMoveInstability * complexPosition;
 
           // Cap used time in case of a single legal move for a better viewer experience in tournaments
           // yielding correct scores and sufficiently fast moves.
@@ -1132,6 +1135,9 @@ moves_loop: // When in check, search starts here
                                                                 [movedPiece]
                                                                 [to_sq(move)];
 
+      unsigned long long nodeCount = 0;
+      if (thisThread == Threads.main() && rootNode) nodeCount = thisThread->nodes;
+
       // Step 16. Make the move
       pos.do_move(move, st, givesCheck);
 
@@ -1239,6 +1245,9 @@ moves_loop: // When in check, search starts here
 
       // Step 19. Undo move
       pos.undo_move(move);
+      
+      if (thisThread == Threads.main() && rootNode)
+          thisThread->spentEffort[from_sq(move)][to_sq(move)] += thisThread->nodes - nodeCount;
 
       assert(value > -VALUE_INFINITE && value < VALUE_INFINITE);
 
